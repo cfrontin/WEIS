@@ -651,6 +651,9 @@ class Blade(om.Group):
             "s_opt_chord", val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["chord"]["n_opt"])
         )
         opt_var.add_output(
+            "s_opt_length_te", val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["length_te"]["n_opt"])
+        ) # alternate parametrization
+        opt_var.add_output(
             "twist_opt",
             val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["twist"]["n_opt"]),
             units="rad",
@@ -660,6 +663,11 @@ class Blade(om.Group):
             units="m",
             val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["chord"]["n_opt"]),
         )
+        opt_var.add_output(
+            "length_te_opt",
+            units="m",
+            val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["length_te"]["n_opt"]),
+        ) # alternate parametrization
         opt_var.add_output("af_position", val=np.ones(rotorse_options["n_af_span"]))
         opt_var.add_output(
             "s_opt_spar_cap_ss",
@@ -709,8 +717,11 @@ class Blade(om.Group):
         # Connections to blade aero parametrization
         self.connect("opt_var.s_opt_twist", "pa.s_opt_twist")
         self.connect("opt_var.s_opt_chord", "pa.s_opt_chord")
+        self.connect("opt_var.s_opt_length_te", "pa.s_opt_length_te")
         self.connect("opt_var.twist_opt", "pa.twist_opt")
         self.connect("opt_var.chord_opt", "pa.chord_opt")
+        self.connect("opt_var.length_te_opt", "pa.length_te_opt")
+        self.connect("outer_shape_bem.pitch_axis", "pa.pitch_axis")
         self.connect("outer_shape_bem.s", "pa.s")
 
         # Interpolate airfoil profiles and coordinates
@@ -722,7 +733,7 @@ class Blade(om.Group):
         # Connections from oute_shape_bem to interp_airfoils
         self.connect("outer_shape_bem.s", "interp_airfoils.s")
         self.connect("pa.chord_param", ["interp_airfoils.chord", "compute_coord_xy_dim.chord"])
-        self.connect("outer_shape_bem.pitch_axis", ["interp_airfoils.pitch_axis", "compute_coord_xy_dim.pitch_axis"])
+        self.connect("pa.pitch_axis_param", ["interp_airfoils.pitch_axis", "compute_coord_xy_dim.pitch_axis"])
         self.connect("opt_var.af_position", "interp_airfoils.af_position")
 
         self.add_subsystem("high_level_blade_props", ComputeHighLevelBladeProperties(rotorse_options=rotorse_options))
@@ -778,7 +789,7 @@ class Blade(om.Group):
         self.connect("outer_shape_bem.s", "internal_structure_2d_fem.s")
         self.connect("pa.twist_param", "internal_structure_2d_fem.twist")
         self.connect("pa.chord_param", "internal_structure_2d_fem.chord")
-        self.connect("outer_shape_bem.pitch_axis", "internal_structure_2d_fem.pitch_axis")
+        self.connect("pa.pitch_axis_param", "internal_structure_2d_fem.pitch_axis")
 
         self.connect("compute_coord_xy_dim.coord_xy_dim", "internal_structure_2d_fem.coord_xy_dim")
 
@@ -950,13 +961,13 @@ class Compute_Blade_Outer_Shape_BEM(om.ExplicitComponent):
         if len(inputs["span_end"]) > 0:
             nd_span_orig = np.linspace(0.0, 1.0, self.n_span)
 
-            chord_orig = np.interp(nd_span_orig, inputs["s_default"], inputs["chord_yaml"])
-            twist_orig = np.interp(nd_span_orig, inputs["s_default"], inputs["twist_yaml"])
-            pitch_axis_orig = np.interp(nd_span_orig, inputs["s_default"], inputs["pitch_axis_yaml"])
+            chord_orig = PchipInterpolator(inputs["s_default"], inputs["chord_yaml"])(nd_span_orig)
+            twist_orig = PchipInterpolator(inputs["s_default"], inputs["twist_yaml"])(nd_span_orig)
+            pitch_axis_orig = PchipInterpolator(inputs["s_default"], inputs["pitch_axis_yaml"])(nd_span_orig)
             ref_axis_orig = np.zeros((self.n_span, 3))
-            ref_axis_orig[:, 0] = np.interp(nd_span_orig, inputs["s_default"], inputs["ref_axis_yaml"][:, 0])
-            ref_axis_orig[:, 1] = np.interp(nd_span_orig, inputs["s_default"], inputs["ref_axis_yaml"][:, 1])
-            ref_axis_orig[:, 2] = np.interp(nd_span_orig, inputs["s_default"], inputs["ref_axis_yaml"][:, 2])
+            ref_axis_orig[:, 0] = PchipInterpolator(inputs["s_default"], inputs["ref_axis_yaml"][:, 0])(nd_span_orig)
+            ref_axis_orig[:, 1] = PchipInterpolator(inputs["s_default"], inputs["ref_axis_yaml"][:, 1])(nd_span_orig)
+            ref_axis_orig[:, 2] = PchipInterpolator(inputs["s_default"], inputs["ref_axis_yaml"][:, 2])(nd_span_orig)
 
             outputs["s"] = copy.copy(nd_span_orig)
 
@@ -977,13 +988,13 @@ class Compute_Blade_Outer_Shape_BEM(om.ExplicitComponent):
                 idx_flap_end += 1
             outputs["s"][idx_flap_start] = flap_start
             outputs["s"][idx_flap_end] = flap_end
-            outputs["chord"] = np.interp(outputs["s"], nd_span_orig, chord_orig)
-            outputs["twist"] = np.interp(outputs["s"], nd_span_orig, twist_orig)
-            outputs["pitch_axis"] = np.interp(outputs["s"], nd_span_orig, pitch_axis_orig)
+            outputs["chord"] = PchipInterpolator(nd_span_orig, chord_orig)(outputs["s"])
+            outputs["twist"] = PchipInterpolator(nd_span_orig, twist_orig)(outputs["s"])
+            outputs["pitch_axis"] = PchipInterpolator(nd_span_orig, pitch_axis_orig)(outputs["s"])
 
-            outputs["ref_axis"][:, 0] = np.interp(outputs["s"], nd_span_orig, ref_axis_orig[:, 0])
-            outputs["ref_axis"][:, 1] = np.interp(outputs["s"], nd_span_orig, ref_axis_orig[:, 1])
-            outputs["ref_axis"][:, 2] = np.interp(outputs["s"], nd_span_orig, ref_axis_orig[:, 2])
+            outputs["ref_axis"][:, 0] = PchipInterpolator(nd_span_orig, ref_axis_orig[:, 0])(outputs["s"])
+            outputs["ref_axis"][:, 1] = PchipInterpolator(nd_span_orig, ref_axis_orig[:, 1])(outputs["s"])
+            outputs["ref_axis"][:, 2] = PchipInterpolator(nd_span_orig, ref_axis_orig[:, 2])(outputs["s"])
         else:
             outputs["s"] = inputs["s_default"]
             outputs["chord"] = inputs["chord_yaml"]
@@ -1429,8 +1440,8 @@ class INN_Airfoils(om.ExplicitComponent):
             cdmax = 1.5
             polar = inn_polar.extrapolate(cdmax)  # Extrapolate polars for alpha between -180 deg and 180 deg
 
-            cl_interp = np.interp(np.degrees(inputs["aoa"]), polar.alpha, polar.cl)
-            cd_interp = np.interp(np.degrees(inputs["aoa"]), polar.alpha, polar.cd)
+            cl_interp = PchipInterpolator(polar.alpha, polar.cl)(np.degrees(inputs["aoa"]))
+            cd_interp = PchipInterpolator(polar.alpha, polar.cd)(np.degrees(inputs["aoa"]))
 
             for j in range(self.n_Re):
                 outputs["cl_interp"][i, :, j, 0] = cl_interp
@@ -2504,11 +2515,11 @@ class MemberGrid(om.ExplicitComponent):
         s_grid = inputs["s_grid"]
 
         if len(inputs["outer_diameter_in"]) > 1:
-            outputs["outer_diameter"] = np.interp(s_grid, s_in, inputs["outer_diameter_in"])
+            outputs["outer_diameter"] = PchipInterpolator(s_in, inputs["outer_diameter_in"])(s_grid)
         else:
             outputs["outer_diameter"][:] = inputs["outer_diameter_in"]
         for k in range(n_layers):
-            outputs["layer_thickness"][k, :] = np.interp(s_grid, s_in, inputs["layer_thickness_in"][k, :])
+            outputs["layer_thickness"][k, :] = PchipInterpolator(s_in, inputs["layer_thickness_in"][k, :])(s_grid)
 
 
 class AggregateJoints(om.ExplicitComponent):
@@ -2592,7 +2603,7 @@ class AggregateJoints(om.ExplicitComponent):
                     s_axial = inputs["member_" + iname + ":grid_axial_joints"][a]
                     joints_xyz[count, :] = joint1xyz + s_axial * dxyz
 
-                    Ra = np.interp(s_axial, s, Rk)
+                    Ra = PchipInterpolator(s, Rk)(s_axial)
                     node_r[count] = max(node_r[count], Ra)
                     intersects[count] += 1
 
@@ -3340,9 +3351,9 @@ class Airfoil3DCorrection(om.ExplicitComponent):
                             inputs["chord"][i] / inputs["r_blade"][i],
                             inputs["rated_TSR"],
                         )
-                        cl_corrected[i, :, j, k] = np.interp(np.degrees(inputs["aoa"]), polar3d.alpha, polar3d.cl)
-                        cd_corrected[i, :, j, k] = np.interp(np.degrees(inputs["aoa"]), polar3d.alpha, polar3d.cd)
-                        cm_corrected[i, :, j, k] = np.interp(np.degrees(inputs["aoa"]), polar3d.alpha, polar3d.cm)
+                        cl_corrected[i, :, j, k] = PchipInterpolator(polar3d.alpha, polar3d.cl)(np.degrees(inputs["aoa"]))
+                        cd_corrected[i, :, j, k] = PchipInterpolator(polar3d.alpha, polar3d.cd)(np.degrees(inputs["aoa"]))
+                        cm_corrected[i, :, j, k] = PchipInterpolator(polar3d.alpha, polar3d.cm)(np.degrees(inputs["aoa"]))
             else:
                 cl_corrected[i, :, :, :] = inputs["cl"][i, :, :, :]
                 cd_corrected[i, :, :, :] = inputs["cd"][i, :, :, :]
