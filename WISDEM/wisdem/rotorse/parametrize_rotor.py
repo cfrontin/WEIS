@@ -74,12 +74,12 @@ class ParametrizeBladeAero(om.ExplicitComponent):
 
         self.add_input(
             "s_opt_length_te",
-            val=np.zeros(n_opt_chord),
+            val=np.zeros(n_opt_length_te),
             desc="1D array of the non-dimensional spanwise grid defined along blade axis to optimize the blade trailing edge length"
         )
         self.add_input(
             "length_te_opt",
-            val=np.ones(n_opt_length_te),
+            val=np.zeros(n_opt_length_te),
             units="m",
             desc="1D array of the chord being optimized at the n_opt locations.",
         )
@@ -118,9 +118,11 @@ class ParametrizeBladeAero(om.ExplicitComponent):
             chord_init= chord_spline(inputs["s"])
             pa_init= inputs["pitch_axis"]
             length_le_init= pa_init*chord_init # leading edge length
-            length_te_init= inputs["length_te_opt"] # trailing edge lencth
+            length_le_spline = spline(inputs["s_opt_chord"], length_le_init)
+            length_te_init= inputs["length_te_opt"] # trailing edge length
+            length_te_spline = spline(inputs["s_opt_length_te"], length_te_init)
 
-            outputs["chord_param"] = length_le_init + length_te_init
+            outputs["chord_param"] = length_le_spline(inputs["s"]) + length_te_spline(inputs["s"])
             outputs["pitch_axis_param"] = length_le_init/outputs["chord_param"]
         else:
             outputs["chord_param"] = chord_spline(inputs["s"])

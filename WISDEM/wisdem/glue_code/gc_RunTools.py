@@ -58,6 +58,11 @@ class Convergence_Trends_Opt(om.ExplicitComponent):
                 for param in rec_data.keys():
                     try:
                         fig, ax = plt.subplots(1, 1, figsize=(5.3, 4))
+                        print()
+                        print(param)
+                        print(iterations)
+                        print(rec_data[param])
+                        print()
                         ax.plot(iterations, rec_data[param])
                         ax.set(xlabel="Number of Iterations", ylabel=param)
                         fig_name = "Convergence_trend_" + param + ".png"
